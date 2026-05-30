@@ -1,1 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Refiner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Overpass+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #121214;
+            --panel-bg: #1a1a1e;
+            --accent-color: #2f2f37;
+            --text-color: #e2e2e4;
+            --text-muted: #88888c;
+            --border-color: #2a2a30;
+            --button-bg: #121214; /* Кнопки в цвет основного фона */
+            --button-hover: #1e1e24;
+        }
 
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Overpass Mono', monospace;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: #000000; /* Черный хедер */
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        main {
+            flex: 1;
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 30px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .config-box {
+            background-color: var(--panel-bg);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .config-box label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .input-field {
+            width: 100%;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 12px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            border-radius: 4px;
+            outline: none;
+            resize: vertical;
+        }
+
+        .input-field:focus {
+            border-color: var(--text-muted);
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .workspace {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .pane {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .pane h2 {
+            font-size: 1rem;
+            color: var(--text-muted);
+        }
+
+        textarea.input-field {
+            height: 250px;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        button {
+            font-family: inherit;
+            background-color: var(--button-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: 12px 24px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--button-hover);
+            border-color: var(--text-muted);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>PROMPT_REPHRASER //</h1>
+    </header>
+
+    <main>
+        <div class="config-box">
+            <label for="apiKey">OPENROUTER API KEY (сохраняется локально в вашем браузере):</label>
+            <input type="password" id="apiKey" class="input-field" placeholder="sk-or-v1-...">
+        </div>
+
+        <div class="workspace">
+            <div class="pane">
+                <h2>Ввод пользователя</h2>
+                <textarea id="userInput" class="input-field" placeholder="Например: напиши код для змейки на c#..."></textarea>
+            </div>
+            
+            <div class="pane">
+                <h2>Улучшенный промпт</h2>
+                <textarea id="outputPrompt" class="input-field" readonly placeholder="Здесь появится результат..."></textarea>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="processBtn">Оптимизировать запрос</button>
+        </div>
+        
+        <div id="statusMessage" class="status"></div>
+    </main>
+
+    <script>
+        // Системный промпт для рерайтера
+        const SYSTEM_PROMPT = `Ты — профессиональный инженер промптов. Твоя задача — взять сырой, нечеткий или короткий запрос пользователя и превратить его в идеальный, структурированный промпт для большой языковой модели.
+
+Правила улучшения:
+1. Добавь контекст и роль (например, "Действуй как эксперт в..."), если это уместно.
+2. Сделай задачу конкретной и избавься от двусмысленности.
+3. Задай четкий формат ответа (структура, списки, тон).
+4. Важно: Сохраняй изначальный смысл и язык запроса пользователя. Не придумывай лишних фактов.
+5. Выводи ТОЛЬКО улучшенный текст промпта, без лишних приветствий, вводных слов и объяснений.`;
+
+        const apiKeyInput = document.getElementById('apiKey');
+        const userInput = document.getElementById('userInput');
+        const outputPrompt = document.getElementById('outputPrompt');
+        const processBtn = document.getElementById('processBtn');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Чтение сохраненного ключа из хранилища браузера
+        if (localStorage.getItem('saved_openrouter_key')) {
+            apiKeyInput.value = localStorage.getItem('saved_openrouter_key');
+        }
+
+        // Сохранение ключа при вводе
+        apiKeyInput.addEventListener('input', () => {
+            localStorage.setItem('saved_openrouter_key', apiKeyInput.value.trim());
+        });
+
+        // Функция отправки запроса
+        async function fetchParaphrase() {
+            const key = apiKeyInput.value.trim();
+            const text = userInput.value.trim();
+
+            if (!key) {
+                statusMessage.textContent = "Ошибка: Пожалуйста, введите ваш OpenRouter API ключ.";
+                return;
+            }
+            if (!text) {
+                statusMessage.textContent = "Ошибка: Введите текст для перефразирования.";
+                return;
+            }
+
+            statusMessage.textContent = "Обработка запроса нейросетью...";
+            processBtn.disabled = true;
+            outputPrompt.value = "";
+
+            try {
+                // Запрос отправляется на сервера OpenRouter
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${key}`,
+                        'HTTP-Referer': window.location.href, // Обязательно для OpenRouter
+                        'X-Title': 'Prompt Rephraser'
+                    },
+                    body: JSON.stringify({
+                        // Бесплатная и мощная модель Gemma 2 9B от Google
+                        model: 'google/gemma-2-9b-it:free', 
+                        messages: [
+                            { role: 'system', content: SYSTEM_PROMPT },
+                            { role: 'user', content: text }
+                        ],
+                        temperature: 0.3
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error?.message || 'Неизвестная ошибка API');
+                }
+
+                // Вывод результата в правое текстовое поле
+                outputPrompt.value = data.choices[0].message.content.trim();
+                statusMessage.textContent = "Готово.";
+
+            } catch (error) {
+                console.error(error);
+                statusMessage.textContent = `Ошибка: ${error.message}`;
+            } finally {
+                processBtn.disabled = false;
+            }
+        }
+
+        processBtn.addEventListener('click', fetchParaphrase);
+    </script>
+</body>
+</html>
