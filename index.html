@@ -182,7 +182,6 @@
     </main>
 
     <script>
-        // Системный промпт для рерайтера
         const SYSTEM_PROMPT = `Ты — профессиональный инженер промптов. Твоя задача — взять сырой, нечеткий или короткий запрос пользователя и превратить его в идеальный, структурированный промпт для большой языковой модели.
 
 Правила улучшения:
@@ -198,18 +197,14 @@
         const processBtn = document.getElementById('processBtn');
         const statusMessage = document.getElementById('statusMessage');
 
-        // Чтение сохраненного ключа из хранилища браузера
         if (localStorage.getItem('saved_openrouter_key')) {
             apiKeyInput.value = localStorage.getItem('saved_openrouter_key');
         }
 
-        // Сохранение ключа при вводе
         apiKeyInput.addEventListener('input', () => {
             localStorage.setItem('saved_openrouter_key', apiKeyInput.value.trim());
         });
 
-        // Функция отправки запроса
-        // Функция отправки запроса с автоматическим перебором моделей при ошибке провайдера
         async function fetchParaphrase() {
             const key = apiKeyInput.value.trim();
             const text = userInput.value.trim();
@@ -226,11 +221,11 @@
             processBtn.disabled = true;
             outputPrompt.value = "";
 
-            // Список бесплатных моделей для перебора в случае падения провайдера
+            // Твой изначальный список бесплатных моделей с сайта
             const models = [
                 'meta-llama/llama-3.2-3b-instruct:free',
-                'google/gemma-4-26b-a4b-it:free',
-                'deepseek/deepseek-v4-flash:free'
+                'deepseek/deepseek-v4-flash:free',
+                'google/gemma-4-26b-a4b-it:free'
             ];
 
             let success = false;
@@ -260,37 +255,29 @@
 
                     const data = await response.json();
 
-                    // Если провайдер вернул ошибку внутри успешного HTTP-ответа (код 200 или 400/500 с ошибкой провайдера)
-                    if (data.error && (data.error.message.includes('Provider') || data.error.code === 503)) {
-                        console.warn(`Модель ${currentModel} временно недоступна. Пробуем следующую...`);
-                        continue; // Переходим к следующему циклу/модели
+                    // Если HTTP статус не ок ИЛИ в теле ответа есть ошибка провайдера/валидации
+                    if (!response.ok || (data.error && (data.error.message.includes('Provider') || data.error.code === 503 || data.error.code === 400))) {
+                        throw new Error(data.error?.message || `Ошибка сервера при работе с ${currentModel}`);
                     }
 
-                    if (!response.ok) {
-                        throw new Error(data.error?.message || 'Неизвестная ошибка API');
-                    }
-
-                    // Если все прошло успешно
                     outputPrompt.value = data.choices[0].message.content.trim();
                     statusMessage.textContent = "Готово.";
                     success = true;
-                    break; // Выходим из цикла
+                    break;
 
                 } catch (error) {
-                    console.error(`Ошибка при работе с ${currentModel}:`, error);
-                    // Если это последняя модель в списке и она упала — выводим ошибку на экран
-                    if (i === models.length - 1) {
-                        statusMessage.textContent = `Ошибка: Не удалось подключиться ни к одной бесплатной модели. Попробуйте позже.`;
+                    console.warn(`Модель ${currentModel} не ответила. Переходим к следующей. Ошибка:`, error.message);
+                    
+                    if (i === models.length - 1 && !success) {
+                        statusMessage.textContent = `Ошибка: Все выбранные бесплатные модели сейчас недоступны. Проверьте правильность API-ключа.`;
                     }
                 }
-            }
-
-            if (!success && statusMessage.textContent === "Обработка запроса нейросетью...") {
-                statusMessage.textContent = "Ошибка связи с сервером. Проверьте сеть или API ключ.";
             }
             
             processBtn.disabled = false;
         }
+
+        processBtn.addEventListener('click', fetchParaphrase);
     </script>
 </body>
 </html>
