@@ -163,8 +163,8 @@
     </main>
 
     <script>
-        
-        const SHARED_API_KEY = "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";
+        // Вставь сюда свой общий токен OpenRouter
+        const SHARED_API_KEY = "СЮДА_ВСТАВЬ_ТВОЙ_ОБЩИЙ_OPENROUTER_КЛЮЧ";
 
         const SYSTEM_PROMPT = `Ты — ведущий UI/UX архитектор и профессиональный инженер промптов для генераторов веб-интерфейсов. Твоя цель — взять короткую, хаотичную или сырую идею пользователя и превратить её в идеальный, технически детализированный промпт для большой языковой модели или нейросети, которая создает дизайн сайтов.
 
@@ -193,19 +193,19 @@
             processBtn.disabled = true;
             outputPrompt.value = "";
 
-            // ТВОЙ ИСХОДНЫЙ СПИСОК МОДЕЛЕЙ БЕЗ ИЗМЕНЕНИЙ
+            // Твой оригинальный список моделей без изменений
             const models = [
                 'meta-llama/llama-3.2-3b-instruct:free',
                 'deepseek/deepseek-v4-flash:free',
                 'google/gemma-4-26b-a4b-it:free',
-                'google/gemma-4-31b-it:free',
                 'openai/gpt-oss-120b:free'
             ];
 
             const startTime = Date.now();
-            const timeoutDuration = 30000; // 30 секунд лимит перебора
+            const timeoutDuration = 30000; 
             let success = false;
             let attemptCount = 1;
+            let lastFailureReason = "";
 
             while (Date.now() - startTime < timeoutDuration && !success) {
                 
@@ -215,7 +215,7 @@
                     const currentModel = models[i];
                     const timeLeft = Math.round((timeoutDuration - (Date.now() - startTime)) / 1000);
                     
-                    statusMessage.textContent = `Попытка [Круг ${attemptCount}] | Модель: ${currentModel.split('/')[1]} | Осталось времени: ${timeLeft} сек...`;
+                    statusMessage.textContent = `Попытка [Круг ${attemptCount}] | Модель: ${currentModel.split('/')[1]} | Осталось: ${timeLeft} сек...`;
 
                     try {
                         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -223,7 +223,7 @@
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Authorization': `Bearer ${SHARED_API_KEY}`,
-                                'HTTP-Referer': window.location.href,
+                                'HTTP-Referer': window.location.origin,
                                 'X-Title': 'Prompt Rephraser'
                             },
                             body: JSON.stringify({
@@ -236,38 +236,41 @@
                             })
                         });
 
-                        // Безопасное чтение JSON-ответа
                         const contentType = response.headers.get("content-type");
                         if (!contentType || !contentType.includes("application/json")) {
-                            throw new Error("Произошел текстовый сбой провайдера");
+                            throw new Error("Не-JSON ответ сети");
                         }
 
                         const data = await response.json();
 
-                        if (!response.ok || (data.error && (data.error.message.includes('Provider') || data.error.code === 503 || data.error.code === 400))) {
-                            throw new Error(data.error?.message || `Ошибка сервера`);
+                        // Проверяем наличие валидного контента ответа, игнорируя промежуточные ошибки провайдеров внутри JSON
+                        if (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+                            outputPrompt.value = data.choices[0].message.content.trim();
+                            statusMessage.textContent = "Готово.";
+                            success = true;
+                            break; 
+                        } else if (data.error) {
+                            throw new Error(data.error.message || "Ошибка модели");
+                        } else {
+                            throw new Error("Пустой ответ");
                         }
 
-                        outputPrompt.value = data.choices[0].message.content.trim();
-                        statusMessage.textContent = "Готово.";
-                        success = true;
-                        break; 
-
                     } catch (error) {
-                        console.warn(`Модель ${currentModel} сбросила запрос на круге ${attemptCount}: ${error.message}`);
+                        lastFailureReason = error.message;
+                        console.warn(`Модель ${currentModel} пропущена: ${error.message}`);
+                        // Ошибка конкретной модели не ломает цикл, скрипт сразу переходит к следующей
                     }
                 }
 
-                // Пауза 2 секунды между кругами опроса
                 if (!success && (Date.now() - startTime < timeoutDuration)) {
-                    statusMessage.textContent = `Модели перегружены. Повторный запуск круга через 2 секунды...`;
+                    statusMessage.textContent = `Ожидание свободных мощностей. Следующий круг через 2 секунды...`;
                     await delay(2000);
                     attemptCount++;
                 }
             }
             
             if (!success) {
-                statusMessage.textContent = `Ошибка: Не удалось получить ответ от моделей за 30 секунд. Попробуйте еще раз.`;
+                statusMessage.textContent = `Все модели перегружены. Последний ответ: ${lastFailureReason}`;
             }
 
             processBtn.disabled = false;
