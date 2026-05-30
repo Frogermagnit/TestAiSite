@@ -209,6 +209,7 @@
         });
 
         // Функция отправки запроса
+        // Функция отправки запроса с автоматическим перебором моделей при ошибке провайдера
         async function fetchParaphrase() {
             const key = apiKeyInput.value.trim();
             const text = userInput.value.trim();
@@ -222,50 +223,74 @@
                 return;
             }
 
-            statusMessage.textContent = "Обработка запроса нейросетью...";
             processBtn.disabled = true;
             outputPrompt.value = "";
 
-            try {
-                // Запрос отправляется на сервера OpenRouter
-                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${key}`,
-                        'HTTP-Referer': window.location.href, // Обязательно для OpenRouter
-                        'X-Title': 'Prompt Rephraser'
-                    },
-                    body: JSON.stringify({
-                        // Бесплатная и мощная модель Gemma 2 9B от Google
-                        model: 'meta-llama/llama-3.3-70b-instruct:free', 
-                        messages: [
-                            { role: 'system', content: SYSTEM_PROMPT },
-                            { role: 'user', content: text }
-                        ],
-                        temperature: 0.3
-                    })
-                });
+            // Список бесплатных моделей для перебора в случае падения провайдера
+            const models = [
+                'meta-llama/llama-3-8b-instruct:free',
+                'mistralai/mistral-7b-instruct:free',
+                'google/gemma-2-9b-it:free'
+            ];
 
-                const data = await response.json();
+            let success = false;
 
-                if (!response.ok) {
-                    throw new Error(data.error?.message || 'Неизвестная ошибка API');
+            for (let i = 0; i < models.length; i++) {
+                const currentModel = models[i];
+                statusMessage.textContent = `Попытка запуска через модель [${i + 1}/${models.length}]: ${currentModel.split('/')[1]}...`;
+
+                try {
+                    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${key}`,
+                            'HTTP-Referer': window.location.href,
+                            'X-Title': 'Prompt Rephraser'
+                        },
+                        body: JSON.stringify({
+                            model: currentModel, 
+                            messages: [
+                                { role: 'system', content: SYSTEM_PROMPT },
+                                { role: 'user', content: text }
+                            ],
+                            temperature: 0.3
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    // Если провайдер вернул ошибку внутри успешного HTTP-ответа (код 200 или 400/500 с ошибкой провайдера)
+                    if (data.error && (data.error.message.includes('Provider') || data.error.code === 503)) {
+                        console.warn(`Модель ${currentModel} временно недоступна. Пробуем следующую...`);
+                        continue; // Переходим к следующему циклу/модели
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(data.error?.message || 'Неизвестная ошибка API');
+                    }
+
+                    // Если все прошло успешно
+                    outputPrompt.value = data.choices[0].message.content.trim();
+                    statusMessage.textContent = "Готово.";
+                    success = true;
+                    break; // Выходим из цикла
+
+                } catch (error) {
+                    console.error(`Ошибка при работе с ${currentModel}:`, error);
+                    // Если это последняя модель в списке и она упала — выводим ошибку на экран
+                    if (i === models.length - 1) {
+                        statusMessage.textContent = `Ошибка: Не удалось подключиться ни к одной бесплатной модели. Попробуйте позже.`;
+                    }
                 }
-
-                // Вывод результата в правое текстовое поле
-                outputPrompt.value = data.choices[0].message.content.trim();
-                statusMessage.textContent = "Готово.";
-
-            } catch (error) {
-                console.error(error);
-                statusMessage.textContent = `Ошибка: ${error.message}`;
-            } finally {
-                processBtn.disabled = false;
             }
-        }
 
-        processBtn.addEventListener('click', fetchParaphrase);
+            if (!success && statusMessage.textContent === "Обработка запроса нейросетью...") {
+                statusMessage.textContent = "Ошибка связи с сервером. Проверьте сеть или API ключ.";
+            }
+            
+            processBtn.disabled = false;
+        }
     </script>
 </body>
 </html>
